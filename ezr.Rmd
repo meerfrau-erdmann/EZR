@@ -1,0 +1,363 @@
+---
+title: "EZR"
+author: "Sandra Erdmann"
+date: "20 December 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## El Zonte Rockpools {.tabset}
+
+    (1) Which rockpool traits determine the **absence and / or presence** of fish in the rockpools?
+    (2) Which rockpools traits determine the **abundance** of fish in the rockpools?
+    (3) Which rockpool traits determine **species richness** in the rockpools?
+    
+    Rockpool traits measured: size, shape, topography, surface area, volume, substrate
+    
+    
+Variables include rockpool traits, response variable is presence or absence (fish), abundance and species richness.
+
+    (1) run a binomial model
+    (2) run a negative binomial model
+    (3) run a ? model
+
+### Explore dataset
+
+```{r load libraries}
+library(emmeans)
+library(ggplot2)
+library(ggfortify)
+library(vegan)
+library(car)
+library(tidyverse)
+```
+    
+```{r load dataset}
+ezr<-read.csv('C:/Users/admin/Desktop/Peces el zonte/EZR1.csv', strip.white=T)
+head(ezr)
+```
+
+```{r summary of dataset}
+summary(ezr)
+```
+
+Dataset contains some zeros for sand, peb, alg and rugp.
+
+```{r structure ezr}
+str(ezr)
+```
+
+    int = integral
+    num = numeric
+    fctr = factor
+    
+    tl = total length
+    savr = surface area volume ratio
+    pevr = perimetry volume ratio
+    rugp = rugosity proportion
+
+Not neccessary for the following analysis are:
+
+    tl
+    OS
+    RS
+    BA
+
+To simplify further analysis, I will exclude these columns:
+
+```{r change ezr}
+ezr<- select(ezr, -tl,-OS, -RS, -BA, -species)
+```
+
+```{r new ezr}
+head(ezr)
+```
+
+pool should be a factor, not an integral. So we will change that:
+
+```{r pool as factor}
+mutate(ezr, pool=as.factor(pool)) 
+```
+
+
+```{r visualize presence or absence of fish}
+ggplot(ezr, aes(x=pool, y=fish)) +
+  geom_point(aes(x=pool, y=fish)) +
+       ggtitle("Species presence in the pools")
+
+ggplot(ezr, aes(x=savr, y=fish)) +
+  geom_point(aes(x=savr, y=fish)) +
+       ggtitle("Species presence related to surface area and volume")
+
+ggplot(ezr, aes(x=pevr, y=fish)) +
+  geom_point(aes(x=pevr, y=fish)) +
+       ggtitle("Species presence related to perimetry and volume")
+```
+Conclusion: If the surface area - volume and the perimetry - volume ratio is small, the presence of fish is more likely.
+
+
+Normality?
+
+Boxplot
+
+```{r boxplot}
+boxplot(ezr)
+```
+
+Histogram
+
+```{r histograms}
+# first row, then column
+par(mfrow=c(2,3))
+attach(ezr)
+hist(dep)
+hist(wid)
+hist(leng)
+hist(per)
+hist(vol)
+hist(height)
+par(mfrow=c(1,2))
+hist(savr)
+hist(pevr)
+par(mfrow=c(2,3))
+hist(sand)
+hist(rock)
+hist(peb)
+hist(alg)
+hist(rug)
+hist(rugp)
+par(mfrow=c(1,2))
+hist(Abundance)
+hist(Richness)
+```
+Conclusion: data is not normal. log transform.
+
+```{r}
+# first row, then column
+par(mfrow=c(2,3))
+attach(ezr)
+hist(log(dep))
+hist(log(wid))
+hist(log(leng))
+hist(log(per))
+hist(log(vol))
+hist(height)
+par(mfrow=c(1,2))
+hist(log(savr))
+hist(log(pevr))
+par(mfrow=c(2,3))
+hist(sqrt(sand))
+hist(sqrt(rock))
+hist(log(peb))
+hist(log(alg))
+hist(log(rug))
+hist(log(rugp))
+par(mfrow=c(1,2))
+hist(log(1+Abundance))
+hist(log(1+Richness))
+```
+Result: log transformation helped for much, but not all variables. Not for height and shifted the substrate variables from left to right. Other transformations (square, antilog, reciprocal) did not give satifying results. For sand and rock (unfortunately) square root worked best.
+
+```{r new dataset tezr}
+#tezr= transformed ezr
+tezr<-ezr %>% mutate(dep=log(dep), wid=log(wid), Abundance=log(1+Abundance), Richness=log(1+Richness))
+```
+
+
+
+```{r pool traits}
+ezr.pool<-select(ezr, dep, wid, leng, vol, height, savr, pevr)
+```
+
+```{r substrate variables}
+ezr.sub<-select(ezr, sand, rock, peb, alg, rug, rugp)
+```
+
+```{r abundance and richness}
+ezr.abri<-select(ezr, savr, pevr, Abundance, Richness)
+```
+
+
+```{r scatterplot}
+scatterplotMatrix(x=ezr.pool, diagonal='boxplot')
+scatterplotMatrix(x=ezr.sub, diagonal='boxplot')
+scatterplotMatrix(x=ezr.abri, diagonal='boxplot')
+```
+
+### (1) Presence or Absence
+
+#### GLM
+
+
+Fit all variables. Consider the order of each variable. Exclude redundant variables with the same informtaion, if they are correlated (colinearity).
+
+```{r fit glm}
+ezr.glm3<-glm(fish~log(dep)+log(wid)+log(leng)+log(per)+log(vol)+log(savr)+log(pevr)+log(1+sand)+log(rock)+peb+alg+rug+rugp+height, family=binomial(link='logit'), data=ezr)
+ezr.glm4<-glm(fish~log(dep)+log(wid)+log(leng)+log(per)+log(vol)+log(savr)+log(pevr)+sand+rock+peb+alg+rug+rugp+height, family=binomial(link='probit'), data=ezr)
+pool.glm<-glm(fish~log(dep)+log(wid)+log(leng)+log(per)+log(vol)+log(savr)+log(pevr), family=binomial(link='logit'), data=ezr)
+sub.glm<-glm(fish~log(1+sand)+log(rock)+peb+alg+rug+rugp+height, family=binomial(link='logit'), data=ezr)
+# AIC is used to compare the models; lowest AIC is the best or within two units within each other
+AIC(ezr.glm3, ezr.glm4, pool.glm, sub.glm)
+```
+
+Result: glm3 fits best due to the lowest AIC and more degrees of freedom.
+
+```{r validate binomial model}
+autoplot(ezr.glm3, which=1:6, ncol=2, label.size=3)
+```
+Result: pattern in the residuals plot, Cook's d is acceptable, since the values are below 0.8.
+
+```{r lack of fit glm}
+ezr.resid<-sum(resid(ezr.glm3, type="pearson")^2)
+1-pchisq(ezr.resid, ezr.glm3$df.resid)
+```
+Result: Since the result of a p-value of 1 is greater than 0.5, there is no lack of fit.
+
+```{r deviance to test lack of fit}
+1-pchisq(ezr.glm3$deviance, ezr.glm3$df.resid)
+```
+
+Result: we can explain 100% of our data. Is that correct? Maybe the model is overfitted. Further reading here:
+
+http://statisticsbyjim.com/regression/overfitting-regression-models/
+
+Calculate predicted R square value
+
+
+Or the model is overdispersed due to many zeros. Check for zero inflated model.
+
+
+```{r summary and the interpretation}
+summary(ezr.glm3)
+```
+
+```{r variance inflation}
+vif(ezr.glm3)
+# since the values are less than 3 (or 5), we 
+# values were removed or taken because the vif was less or greater than 3 or 5
+# if vif is to big, (1) you take them out of the model (2) you combine the variables (predictors) by multivariate techniques since they correlate (3) you run the correlated predictors in separated models
+```
+
+
+```{r tippingpoint; where is the change from a rockpool with or without fish?}
+# LD50 analog to the likelihood of fish being present or absent.
+# brackets help to asign and spit out the result at the same time
+(ld50<- -ezr.glm3$coef[1]/ezr.glm3$coef[2])
+```
+Result: The tippingpoint is at a ratio of 9.11. Thus, when the rockpool has a ratio of 9.11, the likelihood of fish being present decreases.
+
+Visualize this result:
+
+.```{r }
+ezr.grid = with(ezr, list(RATIO = seq(min(RATIO), max(RATIO), len=100)))
+# what does 'at' mean? what does ~ mean?
+newdata=emmeans(ezr.glm,~RATIO, at=polis.grid, type='response') %>%
+        as.data.frame
+head(newdata)
+prop = expected value; is the propability of fish being present
+UCL = upper confidence levels
+prob +- 2xSE
+```
+
+.```{r plot data}
+vline is a vertical line in contrast to hline, which is a horizontal line
+this vline displays the ld50 value and thus the point in which the change occurs
+ggplot(newdata, aes(y=prob, x=RATIO)) +
+        geom_line() +
+        geom_ribbon(aes(ymin=asymp.LCL, ymax=asymp.UCL), fill='blue', alpha=0.2) +
+        geom_point(data=ezr, aes(y=PA, x=RATIO)) +
+        geom_vline(xintercept=ld50, linetype='dashed') +
+        theme_classic()
+```
+
+### Negative Binomial
+
+```{r check for negative binomial}
+library(MASS)
+# nb = negative binomial
+ezr.nb=glm.nb(Abundance~log(dep)+log(wid)+log(leng)+log(per)+log(vol)+log(savr)+log(pevr)+sand+rock+peb+alg+rug+rugp+height, data=ezr)
+autoplot(ezr.nb, which=1:6)
+ezr.resid=sum(resid(ezr.nb, type='pearson')^2)
+1-pchisq(ezr.resid, df=ezr.nb$df.residual)
+```
+
+
+```{r lack of fit nb}
+ezr.resid/ezr.nb$df.residual
+# no evidence of lack of fit, because the value is close to 1
+```
+
+```{r}
+summary(ezr.nb)
+```
+
+```{r visualize your summary}
+library(effects)
+#plot(allEffects(ezr.nb), multiline=TRUE, ci.style='bar')
+```
+
+```{r}
+ezr2.nb=glm.nb(Abundance~log(savr)+log(pevr)+sand+rock+peb+alg+rug+rugp+height, data=ezr)
+autoplot(ezr2.nb, which=1:6)
+```
+
+```{r}
+ezr.resid=sum(resid(ezr2.nb, type='pearson')^2)
+1-pchisq(ezr.resid, df=ezr2.nb$df.residual)
+```
+
+```{r}
+ezr.resid/ezr2.nb$df.residual
+```
+no lack of fit, since value is close to 1
+
+```{r}
+summary(ezr2.nb)
+```
+
+```{r visualize nb2}
+library(effects)
+plot(allEffects(ezr2.nb), multiline=TRUE, ci.style='bar')
+```
+
+### PCA
+
+.```{r standardize}
+decostand is used to do standardizations; 
+vareenv.std<-decostand(vareenv[,-1], "standardize")
+```
+
+
+.```{r fit the PCA model}
+ezr.rda <-rda(ezr.stnd[,-1:-2], scale=TRUE)
+display=NULL shortens the output
+summary(ezr.rda, display=NULL)
+eigenvalue: how much is explained by each principle component
+the first one is explaining a proportion of 38% (0.3855) (PC1)
+PC2 explains 23%, together with 1 it is 61.88% (cumulative)
+how many of the pca s do we want to keep: 3 rules to use in this decision taking: (1) keep as much in order to explain around 80% (here we use the first 3 to end up with 73,62%), (2) go with an eigenvalue greater than 1 (in our case pc1 and 2), because then they explain more than their fare share (eigenbeteiligung 1 out of 8 percentage) (3) you look for a kink, which is a change in direction, which you can see in a screeplot(ezr.rda)
+screeplot(ezr.rda)
+```
+
+.```{r environmental fit}
+put all the data together, the black ones represent the sites; the position according to their coordinates based on pc1 and 2?
+scaling=1 scales the sites and scaling=2 scales the dots
+main="Scaling=1" gives you the title
+biplot(ezr.rda, scaling=1, main="Scaling=1")
+red arrows represent the component loading, the correlation of the original species to the new principal components (that's why it is called pca!!! to getthe main drivers of a community response)
+if a red arrows are vectors and is pointing tin the same directins of an axis, like 7 and 8, so they correlatio with pca 1 and not at all with pca2, because they don't point to pca2
+the length of the line is proportional to how correlated they are, the longer the more correlated
+species 2 is highly corellated to pc1 and pc2
+it is important to which one they are PARRALLEL TO!
+positive or negative is seen on the axis
+
+This has to be in the same chunk, because it will be added to your plot!
+environmental fit includes the habitat
+Xmat = model.matrix(~-1+HABITAT, data=ezr)
+plot(envfit(ezr.rda, Xmat))
+if the species point in the direction of the habitat, then they do prefer these habitats
+species 6 is anticorrelated to habitat b, so denies that habitat, but doesn't prefer a or c
+```
